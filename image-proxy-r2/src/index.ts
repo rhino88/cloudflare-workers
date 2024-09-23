@@ -1,7 +1,7 @@
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		const [requestUrl, err] = trySync(() => new URL(request.url));
-		if (err) {
+		const [requestUrl, requestUrlError] = trySync(() => new URL(request.url));
+		if (requestUrlError) {
 			return new Response('Invalid request URL', { status: 400 });
 		}
 		const imageUrl = requestUrl.searchParams.get('url');
@@ -11,7 +11,7 @@ export default {
 		}
 
 		const [, imageUrlParseError] = trySync(() => new URL(imageUrl));
-		if (err) {
+		if (imageUrlParseError) {
 			return new Response('Invalid image URL', { status: 400 });
 		}
 
@@ -23,10 +23,8 @@ export default {
 		const imageKey = `uploadedImages/${imageUrlHash}`;
 
 		const { R2_BUCKET } = env;
-		// Check if the image already exists in storage
 		const [storedImage] = await tryAsync(() => R2_BUCKET.get(imageKey));
 		if (storedImage) {
-			// Return the image from storage
 			return new Response(storedImage.body, {
 				headers: {
 					'Content-Type': storedImage.httpMetadata?.contentType || 'application/octet-stream',
@@ -34,10 +32,9 @@ export default {
 			});
 		}
 
-		// Fetch the image from the external source
 		const [imageResponse, imageFetchError] = await tryAsync(() => fetch(imageUrl));
 		if (imageFetchError) {
-			return new Response(`Failed to fetch the imagefrom url ${imageUrl}`);			
+			return new Response(`Failed to fetch the image: ${imageUrl}`);
 		}
 
 		if (!imageResponse.ok || !imageResponse.body) {
@@ -46,12 +43,9 @@ export default {
 			});
 		}
 
-		// Stream the image data
 		const { readable, writable } = new TransformStream();
 		ctx.waitUntil(uploadImage(R2_BUCKET, imageResponse.clone(), imageKey));
-
 		imageResponse.body.pipeTo(writable);
-
 		return new Response(readable, {
 			headers: {
 				'Content-Type': imageResponse.headers.get('Content-Type') || 'application/octet-stream',
